@@ -1,0 +1,72 @@
+name: Colorize Photo IPA and tests
+on:
+  push:
+    branches: [colorize-photo-ios]
+    paths: ['ColorizePhoto/**', '.github/workflows/colorize-photo.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install project generator
+        run: brew install xcodegen
+      - name: Fetch and verify full Real-ESRGAN model
+        working-directory: ColorizePhoto
+        run: |
+          python -m pip install coremltools requests
+          python scripts/model.py
+      - name: Generate Xcode project
+        working-directory: ColorizePhoto
+        run: xcodegen generate
+      - name: Test iPhone and iPad
+        working-directory: ColorizePhoto
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,subprocess,os
+          devices=json.loads(subprocess.check_output(['xcrun','simctl','list','devices','available','-j']))['devices']
+          available=[d for runtime,ds in devices.items() if 'iOS' in runtime for d in ds]
+          with open(os.environ['GITHUB_ENV'],'a') as f:
+            for label,prefix in [('PHONE','iPhone'),('PAD','iPad')]:
+              matches=[d for d in available if d['name'].startswith(prefix)]
+              assert matches, f'No {prefix} simulator installed'
+              f.write(f"{label}_ID={matches[0]['udid']}\n")
+          PY
+      - name: Run iPhone tests and actual upscale inference
+        working-directory: ColorizePhoto
+        run: xcodebuild test -project ColorizePhoto.xcodeproj -scheme ColorizePhoto -destination "platform=iOS Simulator,id=$PHONE_ID" -derivedDataPath Derived -resultBundlePath iPhone.xcresult CODE_SIGNING_ALLOWED=NO
+      - name: Run iPad interface tests
+        working-directory: ColorizePhoto
+        run: xcodebuild test -project ColorizePhoto.xcodeproj -scheme ColorizePhoto -destination "platform=iOS Simulator,id=$PAD_ID" -only-testing:PhotoUITests -derivedDataPath Derived -resultBundlePath iPad.xcresult CODE_SIGNING_ALLOWED=NO
+      - name: Build universal iPhone and iPad app
+        working-directory: ColorizePhoto
+        run: |
+          set -euo pipefail
+          xcodebuild -project ColorizePhoto.xcodeproj -scheme ColorizePhoto -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath Release CODE_SIGNING_ALLOWED=NO build
+          mkdir -p Payload
+          cp -R Release/Build/Products/Release-iphoneos/ColorizePhoto.app Payload/
+          /usr/libexec/PlistBuddy -c 'Print UIDeviceFamily' Payload/ColorizePhoto.app/Info.plist
+          test -d Payload/ColorizePhoto.app/RealESRGAN.mlmodelc
+          zip -qr ColorizePhoto-iPhone-iPad-unsigned.ipa Payload
+          unzip -t ColorizePhoto-iPhone-iPad-unsigned.ipa
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: ColorizePhoto-iPhone-iPad-IPA
+          path: ColorizePhoto/ColorizePhoto-iPhone-iPad-unsigned.ipa
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Test-results-and-model-report
+          path: |
+            ColorizePhoto/*.xcresult
+            ColorizePhoto/model-report.json
+          if-no-files-found: warn
