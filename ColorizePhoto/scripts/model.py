@@ -2,15 +2,22 @@ import requests, hashlib, json, pathlib
 import coremltools as ct
 repo='zimageapp/CoreML-Models'
 name='realesrgan512.mlmodel'
-meta=requests.get(f'https://huggingface.co/api/models/{repo}?blobs=true',timeout=60);meta.raise_for_status();meta=meta.json()
-sha=meta['sha']
-entry=next(x for x in meta['siblings'] if x['rfilename']==name)
-expected=entry['lfs']['sha256']
+sha='5d2df01c0895f386793ab3ecf40264d05798e23d'
+expected='6107dc417de87bf974e5b225a2632e2c78f2849265dc897981f482e922050ec9'
 r=requests.get(f'https://huggingface.co/{repo}/resolve/{sha}/{name}',timeout=300);r.raise_for_status()
 assert hashlib.sha256(r.content).hexdigest()==expected,'Model checksum mismatch'
 p=pathlib.Path('PhotoApp/RealESRGAN.mlmodel');p.write_bytes(r.content)
 spec=ct.utils.load_spec(str(p))
-report={'repo':repo,'revision':sha,'sha256':expected,'bytes':len(r.content),'input':str(spec.description.input),'output':str(spec.description.output)}
+network_before=spec.neuralNetwork.SerializeToString()
+for feature in spec.description.input:
+ if feature.type.HasField('imageType'):
+  feature.type.imageType.width=128;feature.type.imageType.height=128
+for feature in spec.description.output:
+ if feature.type.HasField('imageType'):
+  feature.type.imageType.width=512;feature.type.imageType.height=512
+assert network_before==spec.neuralNetwork.SerializeToString(), 'Network weights must remain unchanged'
+ct.utils.save_spec(spec,str(p))
+report={'mobile_tile':128,'weights_unchanged':True,'repo':repo,'revision':sha,'sha256':expected,'bytes':len(r.content),'input':str(spec.description.input),'output':str(spec.description.output)}
 pathlib.Path('model-report.json').write_text(json.dumps(report,indent=2))
 print(json.dumps(report,indent=2))
 assert any(x.type.HasField('imageType') for x in spec.description.input),'Model must accept image input'
