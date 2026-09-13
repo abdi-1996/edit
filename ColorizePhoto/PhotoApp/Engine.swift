@@ -61,9 +61,8 @@ final class PhotoEngine: @unchecked Sendable {
         guard tileW>pad*2,tileH>pad*2 else { throw PhotoFailure(message:"Некорректный размер модели.") }
         let stepW=tileW-pad*2,stepH=tileH-pad*2
         let cols=(image.width+stepW-1)/stepW,rows=(image.height+stepH-1)/stepH
-        // Top-left coordinate drawing is made explicit for CGImage tile assembly.
+        // A bitmap CGContext uses bottom-left coordinates; convert tile placement without flipping each image.
         guard let dest=CGContext(data:nil,width:image.width*scale,height:image.height*scale,bitsPerComponent:8,bytesPerRow:image.width*scale*4,space:CGColorSpaceCreateDeviceRGB(),bitmapInfo:CGImageAlphaInfo.premultipliedLast.rawValue) else { throw PhotoFailure(message:"Недостаточно памяти для результата.") }
-        dest.translateBy(x:0,y:CGFloat(image.height*scale)); dest.scaleBy(x:1,y:-1)
         let ci=CIImage(cgImage:image)
         for row in 0..<rows { for col in 0..<cols {
             try Task.checkCancellation()
@@ -84,7 +83,7 @@ final class PhotoEngine: @unchecked Sendable {
                 else { throw PhotoFailure(message:"Неподдерживаемый результат модели.") }
                 let native=rendered.width/tileW
                 guard native>=2,rendered.height==tileH*native,let center=rendered.cropping(to:CGRect(x:pad*native,y:pad*native,width:w*native,height:h*native)) else { throw PhotoFailure(message:"Неверные размеры результата модели.") }
-                dest.interpolationQuality = .high;dest.draw(center,in:CGRect(x:x*scale,y:y*scale,width:w*scale,height:h*scale))
+                dest.interpolationQuality = .high;dest.draw(center,in:CGRect(x:x*scale,y:(image.height-y-h)*scale,width:w*scale,height:h*scale))
             }
             progress(Double(row*cols+col+1)/Double(rows*cols))
         }}
