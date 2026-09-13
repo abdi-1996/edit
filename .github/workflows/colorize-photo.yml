@@ -62,6 +62,17 @@ jobs:
           name: ColorizePhoto-iPhone-iPad-IPA
           path: ColorizePhoto/ColorizePhoto-iPhone-iPad-unsigned.ipa
           if-no-files-found: error
+      - name: Export test summaries and screenshots
+        if: always()
+        working-directory: ColorizePhoto
+        run: |
+          mkdir -p Screenshots
+          for kind in iPhone iPad; do
+            if [ -d "$kind.xcresult" ]; then
+              xcrun xcresulttool get test-results summary --path "$kind.xcresult" > "$kind-summary.json" || true
+              xcrun xcresulttool export attachments --path "$kind.xcresult" --output-path "Screenshots/$kind" || true
+            fi
+          done
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -69,4 +80,6 @@ jobs:
           path: |
             ColorizePhoto/*.xcresult
             ColorizePhoto/model-report.json
+            ColorizePhoto/*-summary.json
+            ColorizePhoto/Screenshots
           if-no-files-found: warn
